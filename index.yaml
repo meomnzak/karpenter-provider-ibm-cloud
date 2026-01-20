@@ -126,10 +126,10 @@ entries:
       helm.sh/resource-policy: keep
     apiVersion: v2
     appVersion: 0.4.0
-    created: "2026-01-14T01:56:01.586590471Z"
+    created: "2026-01-20T09:09:03.298426292Z"
     description: A Helm chart for Karpenter's IBM Cloud Provider with configurable
       Custom Resources, IKS/VPC mode support, and multiple NodePool management.
-    digest: 18a66546766dd3f1a2750630a10c0fef3d11d4a8514056dadb66a07333fde143
+    digest: 5a3d410b09f0d5e1e411cf7dc40e5d45888a16859e2cb394e8660a420df46c15
     home: https://github.com/kubernetes-sigs/karpenter-provider-ibm-cloud
     icon: https://repository-images.githubusercontent.com/278480393/dab059c8-caa1-4b55-aaa7-3d30e47a5616
     keywords:
@@ -2681,4 +2681,4 @@ entries:
     urls:
     - https://karpenter-ibm.sh/karpenter-ibm-0.2.3.tgz
     version: 0.2.3
-generated: "2026-01-14T01:56:01.583282268Z"
+generated: "2026-01-20T09:09:03.296191429Z"
