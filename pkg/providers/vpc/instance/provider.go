@@ -20,8 +20,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/rand/v2"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/IBM/go-sdk-core/v5/core"
@@ -62,6 +64,7 @@ type VPCInstanceProvider struct {
 	kubeClient             client.Client
 	k8sClient              kubernetes.Interface
 	bootstrapProvider      *bootstrap.VPCBootstrapProvider
+	bootstrapMu            sync.Mutex
 	subnetProvider         subnet.Provider
 	vpcClientManager       *vpcclient.Manager
 	resourceManagerService *resourcemanagerv2.ResourceManagerV2
@@ -1474,22 +1477,22 @@ func (p *VPCInstanceProvider) generateBootstrapUserDataWithInstanceIDAndType(ctx
 		return bootstrap.InjectBootstrapEnvVars(ctx, nodeClass.Spec.UserData), nil
 	}
 
-	// Initialize bootstrap provider if not already done
+	// Initialize bootstrap provider if not already done (mutex allows retry on transient failure)
+	p.bootstrapMu.Lock()
 	if p.bootstrapProvider == nil {
 		if p.k8sClient != nil {
-			// Use properly injected kubernetes client
 			p.bootstrapProvider = bootstrap.NewVPCBootstrapProvider(p.client, p.k8sClient, p.kubeClient)
 		} else {
-			// Create kubernetes client
 			k8sClient, err := p.createKubernetesClient(ctx)
 			if err != nil {
+				p.bootstrapMu.Unlock()
 				return "", fmt.Errorf("failed to create kubernetes client: %w", err)
 			}
-
 			p.k8sClient = k8sClient
 			p.bootstrapProvider = bootstrap.NewVPCBootstrapProvider(p.client, k8sClient, p.kubeClient)
 		}
 	}
+	p.bootstrapMu.Unlock()
 
 	// Generate dynamic bootstrap script with instance ID and selected type
 	logger.Info("Generated dynamic bootstrap script with automatic cluster discovery",
@@ -1550,6 +1553,9 @@ func (p *VPCInstanceProvider) resolveResourceGroupID(ctx context.Context, resour
 
 // isHexString checks if a string contains only hexadecimal characters
 func isHexString(s string) bool {
+	if s == "" {
+		return false
+	}
 	for _, r := range s {
 		if (r < '0' || r > '9') && (r < 'a' || r > 'f') && (r < 'A' || r > 'F') {
 			return false
@@ -1591,7 +1597,7 @@ func isAuthError(err error) bool {
 		strings.Contains(errStr, "403")
 }
 
-// selectSubnetFromStatusList selects a subnet from the pre-selected list in status using round-robin
+// selectSubnetFromStatusList selects a random subnet from the pre-selected list in status
 func (p *VPCInstanceProvider) selectSubnetFromStatusList(subnetIDs []string) string {
 	if len(subnetIDs) == 0 {
 		return ""
@@ -1601,13 +1607,12 @@ func (p *VPCInstanceProvider) selectSubnetFromStatusList(subnetIDs []string) str
 		return subnetIDs[0]
 	}
 
-	// Simple round-robin based on current time for stateless distribution
-	index := int(time.Now().UnixNano()) % len(subnetIDs)
+	index := rand.IntN(len(subnetIDs))
 	return subnetIDs[index]
 }
 
-// selectSubnetFromMultiZoneList selects a subnet from a list using round-robin across zones
-// to ensure balanced distribution when multiple subnets are available across zones
+// selectSubnetFromMultiZoneList selects a random subnet from across zones
+// to distribute instances when multiple subnets are available
 func (p *VPCInstanceProvider) selectSubnetFromMultiZoneList(subnets []subnet.SubnetInfo) subnet.SubnetInfo {
 	if len(subnets) == 0 {
 		// This should not happen as caller checks length, but return empty for safety
@@ -1628,9 +1633,7 @@ func (p *VPCInstanceProvider) selectSubnetFromMultiZoneList(subnets []subnet.Sub
 		zoneSubnets[s.Zone] = append(zoneSubnets[s.Zone], s)
 	}
 
-	// Simple round-robin based on current time for stateless distribution
-	// This ensures different instances get distributed across zones
-	zoneIndex := int(time.Now().UnixNano()) % len(zones)
+	zoneIndex := rand.IntN(len(zones))
 	selectedZone := zones[zoneIndex]
 
 	// Select the best subnet in the chosen zone (highest available IPs)

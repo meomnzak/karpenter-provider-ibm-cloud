@@ -480,8 +480,8 @@ type ImageSelector struct {
 
 // +kubebuilder:validation:XValidation:rule="!has(self.subnet) || self.subnet == \"\" || self.subnet.matches('^[a-zA-Z0-9]{4}-[a-zA-Z0-9]{8}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{12}$')", message="subnet must be a valid IBM Cloud subnet ID format"
 // +kubebuilder:validation:XValidation:rule="!has(self.image) || self.image.matches('^[a-z0-9-]+$')", message="image must contain only lowercase letters, numbers, and hyphens"
-// +kubebuilder:validation:XValidation:rule="has(self.image) || has(self.imageSelector)", message="either image or imageSelector must be specified"
-// +kubebuilder:validation:XValidation:rule="!(has(self.image) && has(self.imageSelector))", message="image and imageSelector are mutually exclusive"
+// +kubebuilder:validation:XValidation:rule="self.image != ” || has(self.imageSelector)", message="either image or imageSelector must be specified"
+// +kubebuilder:validation:XValidation:rule="!(self.image != ” && has(self.imageSelector))", message="image and imageSelector are mutually exclusive"
 // +kubebuilder:validation:XValidation:rule="!(has(self.instanceProfile) && has(self.instanceRequirements))", message="instanceProfile and instanceRequirements are mutually exclusive"
 // +kubebuilder:validation:XValidation:rule="!has(self.bootstrapMode) || self.bootstrapMode != 'iks-api' || has(self.iksClusterID)", message="iksClusterID is required when bootstrapMode is 'iks-api'"
 // +kubebuilder:validation:XValidation:rule="!has(self.zone) || self.zone == \"\" || self.region.startsWith(self.zone.split('-')[0] + '-' + self.zone.split('-')[1])", message="zone must be within the specified region"
@@ -509,7 +509,7 @@ type IBMNodeClassSpec struct {
 	// Examples: "bx2-4x16" (4 vCPUs, 16GB RAM), "mx2-8x64" (8 vCPUs, 64GB RAM), "gx2-16x128x2v100" (GPU instance)
 	// +optional
 	// +kubebuilder:validation:MinLength=1
-	// +kubebuilder:validation:Pattern="^[a-z0-9]+-[0-9]+x[0-9]+$"
+	// +kubebuilder:validation:Pattern="^[a-z][a-z0-9]*-[0-9]+x[0-9]+[a-z0-9x]*$"
 	InstanceProfile string `json:"instanceProfile,omitempty"`
 
 	// InstanceRequirements defines requirements for automatic instance type selection
@@ -558,9 +558,8 @@ type IBMNodeClassSpec struct {
 	// +optional
 	PlacementStrategy *PlacementStrategy `json:"placementStrategy,omitempty"`
 
-	// SecurityGroups is a list of security group IDs to attach to nodes
-	// At least one security group must be specified for VPC instance creation
-	// +kubebuilder:validation:MinItems=1
+	// SecurityGroups is a list of security group IDs to attach to nodes.
+	// If empty, the VPC default security group is used.
 	// +kubebuilder:validation:Items:Pattern="^r[0-9]+-[a-zA-Z0-9]{8}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{12}$"
 	SecurityGroups []string `json:"securityGroups"`
 
@@ -586,8 +585,9 @@ type IBMNodeClassSpec struct {
 	SSHKeys []string `json:"sshKeys,omitempty"`
 
 	// ResourceGroup is the ID of the resource group for the instance
-	// +optional
-	ResourceGroup string `json:"resourceGroup,omitempty"`
+	// +required
+	// +kubebuilder:validation:MinLength=1
+	ResourceGroup string `json:"resourceGroup"`
 
 	// PlacementTarget is the ID of the placement target (dedicated host, placement group)
 	// +optional
@@ -599,9 +599,9 @@ type IBMNodeClassSpec struct {
 
 	// BootstrapMode determines how nodes should be bootstrapped to join the cluster
 	// Valid values are:
-	// - "cloud-init" - Use cloud-init scripts to bootstrap nodes (default)
+	// - "auto" - Automatically select the best method based on cluster type (default)
+	// - "cloud-init" - Use cloud-init scripts to bootstrap nodes
 	// - "iks-api" - Use IKS Worker Pool API to add nodes to cluster
-	// - "auto" - Automatically select the best method based on cluster type
 	// +optional
 	// +kubebuilder:validation:Enum=cloud-init;iks-api;auto
 	// +kubebuilder:default=auto
@@ -612,9 +612,10 @@ type IBMNodeClassSpec struct {
 	// This is useful when the control plane is not accessible via standard discovery methods.
 	// Must be a valid HTTP or HTTPS URL with hostname/IP and port.
 	// Examples: "https://10.243.65.4:6443", "http://k8s-api.example.com:6443"
-	// +optional
+	// +required
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:Pattern="^https?://[a-zA-Z0-9.-]+:[0-9]+$"
-	APIServerEndpoint string `json:"apiServerEndpoint,omitempty"`
+	APIServerEndpoint string `json:"apiServerEndpoint"`
 
 	// IKSClusterID is the IKS cluster ID for API-based bootstrapping.
 	// Required when BootstrapMode is "iks-api".

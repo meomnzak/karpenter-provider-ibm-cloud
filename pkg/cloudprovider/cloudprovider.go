@@ -253,13 +253,14 @@ func (c *CloudProvider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim)
 		if errors.IsNotFound(err) {
 			log.Error(err, "Failed to resolve NodeClass")
 			c.recorder.Publish(ibmevents.NodeClaimFailedToResolveNodeClass(nodeClaim))
+			return nil, cloudprovider.NewNodeClassNotReadyError(fmt.Errorf("resolving node class, %w", err))
 		}
-		return nil, cloudprovider.NewInsufficientCapacityError(fmt.Errorf("resolving node class, %w", err))
+		return nil, err
 	}
 	log.Info("Resolved NodeClass", "nodeClass", nodeClass.Name)
 
 	// Log bootstrap mode for debugging
-	bootstrapMode := "cloud-init"
+	bootstrapMode := "auto"
 	if nodeClass.Spec.BootstrapMode != nil {
 		bootstrapMode = *nodeClass.Spec.BootstrapMode
 	}
@@ -366,11 +367,22 @@ func (c *CloudProvider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim)
 		return nil, fmt.Errorf("provisioning temporarily blocked by circuit breaker: %w", cbErr)
 	}
 
+	// Track whether RecordSuccess or RecordFailure was called so the
+	// concurrentInstances counter is always decremented, even on panics
+	// or early returns between CanProvision and the Record* call.
+	recorded := false
+	defer func() {
+		if !recorded {
+			c.circuitBreakerManager.RecordFailure(nodeClass.Name, nodeClass.Spec.Region, fmt.Errorf("create did not complete"))
+		}
+	}()
+
 	// Get the appropriate instance provider based on NodeClass configuration
 	instanceProvider, err := c.providerFactory.GetInstanceProvider(nodeClass)
 	if err != nil {
 		log.Error(err, "Failed to get instance provider")
 		c.circuitBreakerManager.RecordFailure(nodeClass.Name, nodeClass.Spec.Region, err)
+		recorded = true
 		return nil, fmt.Errorf("getting instance provider, %w", err)
 	}
 
@@ -383,12 +395,14 @@ func (c *CloudProvider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim)
 			"zone", nodeClass.Spec.Zone,
 			"instanceTypes", lo.Map(compatible, func(it *cloudprovider.InstanceType, _ int) string { return it.Name }))
 		c.circuitBreakerManager.RecordFailure(nodeClass.Name, nodeClass.Spec.Region, err)
+		recorded = true
 		return nil, fmt.Errorf("creating instance, %w", err)
 	}
 	log.Info("Created instance")
 
 	// Record successful provisioning for this specific NodeClass
 	c.circuitBreakerManager.RecordSuccess(nodeClass.Name, nodeClass.Spec.Region)
+	recorded = true
 	log.Info("Successfully created instance", "providerID", node.Spec.ProviderID)
 
 	instanceType, _ := lo.Find(compatible, func(i *cloudprovider.InstanceType) bool {
@@ -566,6 +580,9 @@ func (c *CloudProvider) GetInstanceTypes(ctx context.Context, nodePool *karpv1.N
 func (c *CloudProvider) IsDrifted(ctx context.Context, nodeClaim *karpv1.NodeClaim) (driftReason cloudprovider.DriftReason, err error) {
 	log := log.FromContext(ctx).WithValues("nodeClaim", nodeClaim.Name, "providerID", nodeClaim.Status.ProviderID)
 
+	if nodeClaim.Spec.NodeClassRef == nil {
+		return "", nil
+	}
 	nodeClassName := nodeClaim.Spec.NodeClassRef.Name
 	start := time.Now()
 	defer func() {

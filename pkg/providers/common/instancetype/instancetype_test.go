@@ -774,12 +774,17 @@ func TestGetInstanceFamily(t *testing.T) {
 		{
 			name:         "short instance name",
 			instanceType: "ab",
-			expected:     "balanced",
+			expected:     "ab",
 		},
 		{
 			name:         "empty instance name",
 			instanceType: "",
 			expected:     "balanced",
+		},
+		{
+			name:         "instance type with longer family qualifier",
+			instanceType: "bx3d-2x8",
+			expected:     "bx3d",
 		},
 	}
 
@@ -843,7 +848,7 @@ func TestFilterInstanceTypes_Comprehensive(t *testing.T) {
 		client:          mockClient,
 		pricingProvider: mockPricing,
 		zonesCache:      make(map[string][]string),
-		zonesCacheTime:  time.Now().Add(-2 * time.Hour), // Expired cache
+		zonesCacheTime:  map[string]time.Time{"us-south": time.Now().Add(-2 * time.Hour)},
 	}
 
 	tests := []struct {

@@ -125,11 +125,40 @@ entries:
   - annotations:
       helm.sh/resource-policy: keep
     apiVersion: v2
-    appVersion: 1.0.2
-    created: "2026-03-06T22:15:05.570132541Z"
+    appVersion: 1.0.3
+    created: "2026-04-03T17:52:36.025734035Z"
     description: A Helm chart for Karpenter's IBM Cloud Provider with configurable
       Custom Resources, IKS/VPC mode support, and multiple NodePool management.
-    digest: f21a913edf2a260cdfed3eb9c9686fc92140e2f456f2ec09b9daa261b1cc7ded
+    digest: b5eeed1a9841acac0fb7b36f26b3dd867119a8e45c1b966732a9d01e2f04019f
+    home: https://github.com/kubernetes-sigs/karpenter-provider-ibm-cloud
+    icon: https://repository-images.githubusercontent.com/278480393/dab059c8-caa1-4b55-aaa7-3d30e47a5616
+    keywords:
+    - cluster
+    - node
+    - scheduler
+    - autoscaling
+    - lifecycle
+    - ibm
+    - cloud
+    - vpc
+    - iks
+    - nodepool
+    - custom-resources
+    name: karpenter-ibm
+    sources:
+    - https://github.com/kubernetes-sigs/karpenter-provider-ibm-cloud
+    type: application
+    urls:
+    - https://karpenter-ibm.sh/karpenter-ibm-1.0.3.tgz
+    version: 1.0.3
+  - annotations:
+      helm.sh/resource-policy: keep
+    apiVersion: v2
+    appVersion: 1.0.2
+    created: "2026-01-30T13:23:54.160739984Z"
+    description: A Helm chart for Karpenter's IBM Cloud Provider with configurable
+      Custom Resources, IKS/VPC mode support, and multiple NodePool management.
+    digest: c9ad1c454d54af458bc52cd581d23d3eb5d25aadf3a453ee0eea777d70541a6c
     home: https://github.com/kubernetes-sigs/karpenter-provider-ibm-cloud
     icon: https://repository-images.githubusercontent.com/278480393/dab059c8-caa1-4b55-aaa7-3d30e47a5616
     keywords:
@@ -2710,4 +2739,4 @@ entries:
     urls:
     - https://karpenter-ibm.sh/karpenter-ibm-0.2.3.tgz
     version: 0.2.3
-generated: "2026-03-06T22:15:05.566701963Z"
+generated: "2026-04-03T17:52:36.023470545Z"

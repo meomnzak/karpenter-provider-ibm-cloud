@@ -68,12 +68,13 @@ import (
 	nodeclaimtagging "github.com/kubernetes-sigs/karpenter-provider-ibm-cloud/pkg/controllers/nodeclaim/tagging"
 	nodeclassautoplacement "github.com/kubernetes-sigs/karpenter-provider-ibm-cloud/pkg/controllers/nodeclass/autoplacement"
 	nodeclasshash "github.com/kubernetes-sigs/karpenter-provider-ibm-cloud/pkg/controllers/nodeclass/hash"
-	nodeclaasstatus "github.com/kubernetes-sigs/karpenter-provider-ibm-cloud/pkg/controllers/nodeclass/status"
+	nodeclassstatus "github.com/kubernetes-sigs/karpenter-provider-ibm-cloud/pkg/controllers/nodeclass/status"
 	nodeclasstermination "github.com/kubernetes-sigs/karpenter-provider-ibm-cloud/pkg/controllers/nodeclass/termination"
 	providersinstancetype "github.com/kubernetes-sigs/karpenter-provider-ibm-cloud/pkg/controllers/providers/instancetype"
 	controllerspricing "github.com/kubernetes-sigs/karpenter-provider-ibm-cloud/pkg/controllers/providers/pricing"
 	"github.com/kubernetes-sigs/karpenter-provider-ibm-cloud/pkg/providers"
 	"github.com/kubernetes-sigs/karpenter-provider-ibm-cloud/pkg/providers/common/instancetype"
+	"github.com/kubernetes-sigs/karpenter-provider-ibm-cloud/pkg/providers/common/pricing"
 	"github.com/kubernetes-sigs/karpenter-provider-ibm-cloud/pkg/providers/vpc/subnet"
 )
 
@@ -138,13 +139,15 @@ func NewControllers(
 		controllers = append(controllers, hashCtrl)
 	}
 
+	// Autoplacement controller self-registers with the manager via builder.ControllerManagedBy().Complete()
+	// inside NewController, so it does not need to be appended to the controllers slice.
 	if _, err := nodeclassautoplacement.NewController(mgr, instanceTypeProvider, subnetProvider); err != nil {
 		logger.Error(err, "failed to create autoplacement controller")
 	} else {
 		logger.Info("Successfully registered autoplacement controller")
 	}
 
-	if statusCtrl, err := nodeclaasstatus.NewController(kubeClient, mgr.GetAPIReader()); err != nil {
+	if statusCtrl, err := nodeclassstatus.NewController(kubeClient, mgr.GetAPIReader()); err != nil {
 		logger.Error(err, "failed to create status controller")
 	} else {
 		controllers = append(controllers, statusCtrl)
@@ -154,12 +157,6 @@ func NewControllers(
 		logger.Error(err, "failed to create termination controller")
 	} else {
 		controllers = append(controllers, terminationCtrl)
-	}
-
-	if pricingCtrl, err := controllerspricing.NewController(nil); err != nil {
-		logger.Error(err, "failed to create pricing controller")
-	} else {
-		controllers = append(controllers, pricingCtrl)
 	}
 
 	// Add garbage collection controller
@@ -219,6 +216,17 @@ func NewControllers(
 	}
 	interruptionCtrl := interruption.NewController(kubeClient, recorderAdapter, unavailableOfferings, providerFactory)
 	controllers = append(controllers, interruptionCtrl)
+
+	// Add pricing controller with the real provider from the factory when available
+	var pricingProvider pricing.Provider
+	if providerFactory != nil {
+		pricingProvider = providerFactory.GetPricingProvider()
+	}
+	if pricingCtrl, err := controllerspricing.NewController(pricingProvider); err != nil {
+		logger.Error(err, "failed to create pricing controller")
+	} else {
+		controllers = append(controllers, pricingCtrl)
+	}
 
 	// Add orphaned node cleanup controller (only if enabled and IBM client available)
 	if ibmClient != nil && isOrphanCleanupEnabled() {

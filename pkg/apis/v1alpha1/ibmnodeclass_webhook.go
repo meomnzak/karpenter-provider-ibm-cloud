@@ -81,9 +81,9 @@ func (nc *IBMNodeClass) validateNodeClass(nodeClass *IBMNodeClass) (admission.Wa
 
 	// Validate bootstrap mode
 	if nodeClass.Spec.BootstrapMode == nil {
-		warnings = append(warnings, "bootstrapMode not specified, defaulting to 'cloud-init'")
-	} else if *nodeClass.Spec.BootstrapMode != "cloud-init" && *nodeClass.Spec.BootstrapMode != "iks" && *nodeClass.Spec.BootstrapMode != "user-data" {
-		errs = append(errs, fmt.Sprintf("invalid bootstrapMode '%s' (valid values: cloud-init, iks, user-data)", *nodeClass.Spec.BootstrapMode))
+		warnings = append(warnings, "bootstrapMode not specified, defaulting to 'auto'")
+	} else if *nodeClass.Spec.BootstrapMode != "cloud-init" && *nodeClass.Spec.BootstrapMode != "iks-api" && *nodeClass.Spec.BootstrapMode != "auto" {
+		errs = append(errs, fmt.Sprintf("invalid bootstrapMode '%s' (valid values: cloud-init, iks-api, auto)", *nodeClass.Spec.BootstrapMode))
 	}
 
 	warnings = append(warnings, nc.validateSecurityGroups(nodeClass, &errs)...)
@@ -304,7 +304,7 @@ func (nc *IBMNodeClass) validateInstanceProfile(nodeClass *IBMNodeClass) []strin
 
 	// IBM Cloud instance profile format validation
 	// Valid formats: bx2-2x8, cx2-4x8, mx2-8x64, etc.
-	instanceProfilePattern := regexp.MustCompile(`^[a-z0-9]+[0-9a-z]*-[0-9]+x[0-9]+$`)
+	instanceProfilePattern := regexp.MustCompile(`^[a-z][a-z0-9]*-[0-9]+x[0-9]+[a-z0-9x]*$`)
 
 	if nodeClass.Spec.InstanceProfile != "" {
 		// Validate format

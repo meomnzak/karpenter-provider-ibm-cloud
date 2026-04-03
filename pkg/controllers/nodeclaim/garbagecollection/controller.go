@@ -22,6 +22,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/awslabs/operatorpkg/reconciler"
@@ -42,6 +43,10 @@ import (
 	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+
+	"github.com/kubernetes-sigs/karpenter-provider-ibm-cloud/pkg/controllers/nodeclaim/loadbalancer"
+	"github.com/kubernetes-sigs/karpenter-provider-ibm-cloud/pkg/controllers/nodeclaim/registration"
+	"github.com/kubernetes-sigs/karpenter-provider-ibm-cloud/pkg/controllers/nodeclaim/startuptaint"
 )
 
 type Controller struct {
@@ -60,6 +65,23 @@ const (
 	// DefaultRegistrationTimeout is the maximum time to wait for node registration before cleanup
 	DefaultRegistrationTimeout = 30 * time.Minute
 )
+
+var karpenterOwnedFinalizers = sets.New(
+	karpv1.TerminationFinalizer,
+	registration.NodeClaimRegistrationFinalizer,
+	loadbalancer.LoadBalancerFinalizer,
+	startuptaint.StartupTaintLifecycleFinalizer,
+)
+
+func removeKarpenterFinalizers(finalizers []string) []string {
+	var remaining []string
+	for _, f := range finalizers {
+		if !karpenterOwnedFinalizers.Has(f) {
+			remaining = append(remaining, f)
+		}
+	}
+	return remaining
+}
 
 func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) *Controller {
 	return &Controller{
@@ -175,8 +197,8 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	if err = multierr.Combine(filteredErrs...); err != nil {
 		return reconciler.Result{}, err
 	}
-	c.successfulCount++
-	return reconciler.Result{RequeueAfter: lo.Ternary(c.successfulCount <= 20, time.Second*10, time.Minute*2)}, nil
+	count := atomic.AddUint64(&c.successfulCount, 1)
+	return reconciler.Result{RequeueAfter: lo.Ternary(count <= 20, time.Second*10, time.Minute*2)}, nil
 }
 
 // handleStuckTerminatingNodeClaims identifies and force-cleans stuck terminating NodeClaims
@@ -288,15 +310,14 @@ func (c *Controller) removeNodeFinalizers(ctx context.Context, node *corev1.Node
 		return client.IgnoreNotFound(err)
 	}
 
-	// Remove all finalizers
+	// Remove only Karpenter-owned finalizers
 	if len(freshNode.Finalizers) > 0 {
-		finalizerCount := len(freshNode.Finalizers)
 		patch := client.MergeFrom(freshNode.DeepCopy())
-		freshNode.Finalizers = nil
+		freshNode.Finalizers = removeKarpenterFinalizers(freshNode.Finalizers)
 		if err := c.kubeClient.Patch(ctx, freshNode, patch); err != nil {
 			return fmt.Errorf("removing finalizers from node: %w", err)
 		}
-		log.FromContext(ctx).Info("removed finalizers from orphaned node", "finalizer-count", finalizerCount)
+		log.FromContext(ctx).Info("removed karpenter finalizers from orphaned node")
 	}
 
 	return nil
@@ -390,10 +411,10 @@ func (c *Controller) cleanupFailedRegistrationNodeClaim(ctx context.Context, nc 
 		log.FromContext(ctx).Error(err, "failed to delete cloud provider instance for failed registration")
 	}
 
-	// Step 2: Remove finalizers to allow NodeClaim deletion
+	// Step 2: Remove Karpenter-owned finalizers to allow NodeClaim deletion
 	if len(nc.Finalizers) > 0 {
 		patch := client.MergeFrom(nc.DeepCopy())
-		nc.Finalizers = nil
+		nc.Finalizers = removeKarpenterFinalizers(nc.Finalizers)
 		if err := c.kubeClient.Patch(ctx, nc, patch); err != nil {
 			return fmt.Errorf("removing finalizers from failed registration nodeclaim: %w", err)
 		}
@@ -434,10 +455,10 @@ func (c *Controller) forceCleanupStuckNodeClaim(ctx context.Context, nc *karpv1.
 		log.FromContext(ctx).Error(err, "failed to delete cloud provider instance")
 	}
 
-	// Step 4: Remove finalizers to allow NodeClaim deletion
+	// Step 4: Remove Karpenter-owned finalizers to allow NodeClaim deletion
 	if len(nc.Finalizers) > 0 {
 		patch := client.MergeFrom(nc.DeepCopy())
-		nc.Finalizers = nil
+		nc.Finalizers = removeKarpenterFinalizers(nc.Finalizers)
 		if err := c.kubeClient.Patch(ctx, nc, patch); err != nil {
 			return fmt.Errorf("removing finalizers from stuck nodeclaim: %w", err)
 		}
@@ -486,8 +507,9 @@ func (c *Controller) garbageCollect(ctx context.Context, nodeClaim *karpv1.NodeC
 	}
 
 	// Step 2: Find and delete the corresponding Kubernetes node
+	normalizedClaimID := c.normalizeProviderID(nodeClaim.Status.ProviderID)
 	if node, ok := lo.Find(nodeList.Items, func(n corev1.Node) bool {
-		return n.Spec.ProviderID == nodeClaim.Status.ProviderID
+		return c.normalizeProviderID(n.Spec.ProviderID) == normalizedClaimID
 	}); ok {
 		// Remove finalizers first
 		if err := c.removeNodeFinalizers(ctx, &node); err != nil {
